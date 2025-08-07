@@ -28,6 +28,10 @@ import uvicorn
 # Import medicine recommendation system
 from medicine_recommendation_system import medicine_engine
 
+# Import inventory management services
+from services.alerts_service import alerts_service, AlertType, AlertStatus
+from services.purchase_order_service import purchase_order_service, PurchaseOrderStatus
+
 app = FastAPI(title="Infinite Memory API - Improved", version="2.0.0")
 
 # Add CORS middleware
@@ -79,6 +83,32 @@ class MedicineRecommendationRequest(BaseModel):
 class UpdateStockRequest(BaseModel):
     medicine_id: str
     new_quantity: int
+
+class UpdateMedicalSupplyStockRequest(BaseModel):
+    item_id: str
+    new_quantity: int
+
+class DismissAlertRequest(BaseModel):
+    alert_id: str
+
+class CreatePurchaseOrderRequest(BaseModel):
+    item_id: str
+    quantity: int
+    supplier_id: str
+    notes: Optional[str] = None
+
+class UpdatePurchaseOrderRequest(BaseModel):
+    order_id: str
+    status: PurchaseOrderStatus
+    notes: Optional[str] = None
+
+class AddMedicalSupplyRequest(BaseModel):
+    name: str
+    current_stock: int
+    threshold_quantity: int
+    expiry_date: Optional[str] = None
+    supplier_id: str
+    unit: str = "units"
 
 class MemoryAnalysis(BaseModel):
     importance_score: float
@@ -644,6 +674,246 @@ async def update_medicine_stock(request: UpdateStockRequest):
         return {"message": f"Stock updated for medicine {request.medicine_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stock update error: {str(e)}")
+
+# Inventory Management Endpoints
+
+@app.get("/inventory/supplies")
+async def get_medical_supplies():
+    """Get all medical supplies"""
+    try:
+        supplies = alerts_service.get_medical_supplies()
+        return [
+            {
+                "id": supply.id,
+                "name": supply.name,
+                "current_stock": supply.current_stock,
+                "threshold_quantity": supply.threshold_quantity,
+                "expiry_date": supply.expiry_date.isoformat() if supply.expiry_date else None,
+                "supplier_id": supply.supplier_id,
+                "supplier_name": supply.supplier_name,
+                "unit": supply.unit,
+                "status": "low_stock" if supply.current_stock <= supply.threshold_quantity else "normal"
+            }
+            for supply in supplies
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Medical supplies retrieval error: {str(e)}")
+
+@app.post("/inventory/supplies")
+async def add_medical_supply(request: AddMedicalSupplyRequest):
+    """Add a new medical supply"""
+    try:
+        from services.alerts_service import MedicalSupply
+        from datetime import datetime
+        
+        expiry_date = None
+        if request.expiry_date:
+            expiry_date = datetime.fromisoformat(request.expiry_date.replace('Z', '+00:00'))
+        
+        supply = MedicalSupply(
+            id=f"ms_{len(alerts_service.medical_supplies) + 1:03d}",
+            name=request.name,
+            current_stock=request.current_stock,
+            threshold_quantity=request.threshold_quantity,
+            expiry_date=expiry_date,
+            supplier_id=request.supplier_id,
+            supplier_name=purchase_order_service.get_supplier_by_id(request.supplier_id).name if purchase_order_service.get_supplier_by_id(request.supplier_id) else "Unknown Supplier",
+            unit=request.unit
+        )
+        
+        alerts_service.add_medical_supply(supply)
+        return {"message": f"Medical supply {request.name} added successfully", "supply_id": supply.id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Medical supply creation error: {str(e)}")
+
+@app.post("/inventory/supplies/update-stock")
+async def update_medical_supply_stock(request: UpdateMedicalSupplyStockRequest):
+    """Update medical supply stock quantity"""
+    try:
+        success = alerts_service.update_stock(request.item_id, request.new_quantity)
+        if not success:
+            raise HTTPException(status_code=404, detail="Medical supply not found")
+        
+        return {"message": f"Stock updated for medical supply {request.item_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stock update error: {str(e)}")
+
+@app.get("/inventory/alerts")
+async def get_inventory_alerts():
+    """Get all inventory alerts"""
+    try:
+        alerts = alerts_service.get_all_alerts()
+        return [
+            {
+                "alert_id": alert.alert_id,
+                "item_id": alert.item_id,
+                "item_name": alert.item_name,
+                "type": alert.type.value,
+                "message": alert.message,
+                "created_at": alert.created_at.isoformat(),
+                "status": alert.status.value,
+                "severity": alert.severity
+            }
+            for alert in alerts
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Alerts retrieval error: {str(e)}")
+
+@app.get("/inventory/alerts/statistics")
+async def get_alert_statistics():
+    """Get alert statistics"""
+    try:
+        return alerts_service.get_alert_statistics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Alert statistics error: {str(e)}")
+
+@app.post("/inventory/alerts/dismiss")
+async def dismiss_alert(request: DismissAlertRequest):
+    """Dismiss an alert"""
+    try:
+        success = alerts_service.dismiss_alert(request.alert_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        
+        return {"message": f"Alert {request.alert_id} dismissed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Alert dismissal error: {str(e)}")
+
+@app.post("/inventory/alerts/check")
+async def run_alert_check():
+    """Manually trigger alert checks"""
+    try:
+        alerts_service.run_manual_check()
+        return {"message": "Alert checks completed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Alert check error: {str(e)}")
+
+@app.get("/inventory/purchase-orders")
+async def get_purchase_orders():
+    """Get all purchase orders"""
+    try:
+        orders = purchase_order_service.get_all_purchase_orders()
+        return [
+            {
+                "order_id": order.order_id,
+                "item_id": order.item_id,
+                "item_name": order.item_name,
+                "quantity": order.quantity,
+                "supplier_id": order.supplier_id,
+                "supplier_name": order.supplier_name,
+                "supplier_email": order.supplier_email,
+                "status": order.status.value,
+                "created_at": order.created_at.isoformat(),
+                "sent_at": order.sent_at.isoformat() if order.sent_at else None,
+                "confirmed_at": order.confirmed_at.isoformat() if order.confirmed_at else None,
+                "received_at": order.received_at.isoformat() if order.received_at else None,
+                "notes": order.notes,
+                "unit_price": order.unit_price,
+                "total_amount": order.total_amount
+            }
+            for order in orders
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Purchase orders retrieval error: {str(e)}")
+
+@app.post("/inventory/purchase-orders")
+async def create_purchase_order(request: CreatePurchaseOrderRequest):
+    """Create a new purchase order"""
+    try:
+        supply = alerts_service.get_supply_by_id(request.item_id)
+        if not supply:
+            raise HTTPException(status_code=404, detail="Medical supply not found")
+        
+        order = purchase_order_service.create_purchase_order(
+            item_id=request.item_id,
+            item_name=supply.name,
+            current_stock=supply.current_stock,
+            threshold_quantity=supply.threshold_quantity,
+            supplier_id=request.supplier_id
+        )
+        
+        if not order:
+            raise HTTPException(status_code=400, detail="Failed to create purchase order")
+        
+        return {"message": f"Purchase order {order.order_id} created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Purchase order creation error: {str(e)}")
+
+@app.put("/inventory/purchase-orders/{order_id}")
+async def update_purchase_order(order_id: str, request: UpdatePurchaseOrderRequest):
+    """Update purchase order status"""
+    try:
+        success = purchase_order_service.update_order_status(order_id, request.status, request.notes)
+        if not success:
+            raise HTTPException(status_code=404, detail="Purchase order not found")
+        
+        return {"message": f"Purchase order {order_id} updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Purchase order update error: {str(e)}")
+
+@app.get("/inventory/purchase-orders/{order_id}/email")
+async def get_purchase_order_email(order_id: str):
+    """Get email content for a purchase order"""
+    try:
+        order = purchase_order_service.get_purchase_order_by_id(order_id)
+        if not order:
+            raise HTTPException(status_code=404, detail="Purchase order not found")
+        
+        email_content = purchase_order_service.generate_email_content(order)
+        return {"email_content": email_content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email generation error: {str(e)}")
+
+@app.get("/inventory/purchase-orders/statistics")
+async def get_purchase_order_statistics():
+    """Get purchase order statistics"""
+    try:
+        return purchase_order_service.get_order_statistics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Purchase order statistics error: {str(e)}")
+
+@app.post("/inventory/purchase-orders/auto-generate")
+async def auto_generate_purchase_orders():
+    """Auto-generate purchase orders for low stock items"""
+    try:
+        supplies = alerts_service.get_medical_supplies()
+        generated_orders = purchase_order_service.auto_generate_orders_for_low_stock(supplies)
+        
+        return {
+            "message": f"Generated {len(generated_orders)} purchase orders",
+            "generated_orders": [
+                {
+                    "order_id": order.order_id,
+                    "item_name": order.item_name,
+                    "quantity": order.quantity,
+                    "supplier_name": order.supplier_name
+                }
+                for order in generated_orders
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Auto-generation error: {str(e)}")
+
+@app.get("/inventory/suppliers")
+async def get_suppliers():
+    """Get all suppliers"""
+    try:
+        suppliers = purchase_order_service.get_suppliers()
+        return [
+            {
+                "id": supplier.id,
+                "name": supplier.name,
+                "email": supplier.email,
+                "phone": supplier.phone,
+                "address": supplier.address,
+                "default_order_quantity": supplier.default_order_quantity,
+                "minimum_order_quantity": supplier.minimum_order_quantity,
+                "lead_time_days": supplier.lead_time_days
+            }
+            for supplier in suppliers
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Suppliers retrieval error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 

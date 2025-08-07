@@ -3,6 +3,7 @@ import { StatsGrid } from "@/components/dashboard/StatsGrid";
 import { InventoryTable } from "@/components/dashboard/InventoryTable";
 import { BlockchainActivity } from "@/components/dashboard/BlockchainActivity";
 import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
+import InventoryNav from "@/components/inventory/InventoryNav";
 import heroImage from "@/assets/medical-hero.jpg";
 
 const Index = () => {
@@ -64,6 +65,7 @@ const Index = () => {
             <div className="space-y-8">
               <AlertsPanel />
               <BlockchainActivity />
+              <InventoryNav />
             </div>
           </div>
         </div>

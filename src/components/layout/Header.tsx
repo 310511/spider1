@@ -1,4 +1,4 @@
-import { Bell, Search, Shield, User, Brain, TrendingUp, Pill } from "lucide-react";
+import { Bell, Search, Shield, User, Brain, TrendingUp, Pill, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
@@ -43,6 +43,13 @@ export const Header = () => {
           <Button variant="outline" className="font-semibold">
             <Pill className="h-4 w-4 mr-2" />
             Medicine AI
+          </Button>
+        </Link>
+
+        <Link to="/inventory">
+          <Button variant="outline" className="font-semibold">
+            <Package className="h-4 w-4 mr-2" />
+            Inventory
           </Button>
         </Link>
         

@@ -13,6 +13,8 @@ import { InventoryProvider } from "@/contexts/InventoryContext";
 import { InfiniteMemoryDashboard } from "@/components/infinite-memory/InfiniteMemoryDashboard";
 import { InfiniteMemoryDemo } from "@/components/infinite-memory/InfiniteMemoryDemo";
 import { MLPredictionsDashboard } from "@/components/ml-predictions/MLPredictionsDashboard";
+import { MedicineRecommendationDashboard } from "@/components/medicine-recommendation/MedicineRecommendationDashboard";
+import InventoryDashboard from "@/components/inventory/InventoryDashboard";
 import { Notifications } from "@/components/ui/notifications";
 import { useBlockchain } from "@/contexts/BlockchainContext";
 
@@ -39,6 +41,8 @@ const AppContent = () => {
         <Route path="/infinite-memory" element={<InfiniteMemoryDashboard />} />
         <Route path="/infinite-memory-demo" element={<InfiniteMemoryDemo />} />
         <Route path="/ml-predictions" element={<MLPredictionsDashboard />} />
+        <Route path="/medicine-recommendation" element={<MedicineRecommendationDashboard />} />
+        <Route path="/inventory" element={<InventoryDashboard />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
         <Route path="*" element={<NotFound />} />
       </Routes>
