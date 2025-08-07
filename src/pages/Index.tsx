@@ -3,8 +3,6 @@ import { StatsGrid } from "@/components/dashboard/StatsGrid";
 import { InventoryTable } from "@/components/dashboard/InventoryTable";
 import { BlockchainActivity } from "@/components/dashboard/BlockchainActivity";
 import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
-import { InfiniteMemoryNav } from "@/components/infinite-memory/InfiniteMemoryNav";
-import { MLPredictionsNav } from "@/components/ml-predictions/MLPredictionsNav";
 import heroImage from "@/assets/medical-hero.jpg";
 
 const Index = () => {
@@ -66,8 +64,6 @@ const Index = () => {
             <div className="space-y-8">
               <AlertsPanel />
               <BlockchainActivity />
-              <InfiniteMemoryNav />
-              <MLPredictionsNav />
             </div>
           </div>
         </div>

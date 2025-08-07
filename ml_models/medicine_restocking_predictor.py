@@ -1,18 +1,11 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.feature_selection import SelectKBest, f_regression
-import xgboost as xgb
-import lightgbm as lgb
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import joblib
+import os
 from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
@@ -20,456 +13,426 @@ warnings.filterwarnings('ignore')
 class MedicineRestockingPredictor:
     def __init__(self):
         self.models = {}
-        self.scaler = StandardScaler()
-        self.label_encoders = {}
-        self.feature_importance = {}
-        self.best_model = None
-        self.best_model_name = None
+        self.scalers = {}
+        self.feature_columns = ['Year', 'Month', 'Hour', 'Weekday_encoded']
+        self.model_path = 'ml_models/trained_models/'
+        self.scaler_path = 'ml_models/scalers/'
         
-    def load_and_preprocess_data(self, file_path):
-        """
-        Load and preprocess medicine inventory data
-        """
-        print("Loading and preprocessing data...")
+        # Create directories if they don't exist
+        os.makedirs(self.model_path, exist_ok=True)
+        os.makedirs(self.scaler_path, exist_ok=True)
+    
+    def load_and_preprocess_data(self):
+        """Load and preprocess sales data from archive folder"""
+        print("Loading sales data...")
         
-        # Load the dataset
+        # Load daily sales data
+        daily_data = pd.read_csv('archive/salesdaily.csv')
+        
+        # Convert date column
+        daily_data['datum'] = pd.to_datetime(daily_data['datum'])
+        
+        # Create additional features
+        daily_data['Weekday_encoded'] = pd.Categorical(daily_data['Weekday Name']).codes
+        daily_data['Day_of_month'] = daily_data['datum'].dt.day
+        daily_data['Week_of_year'] = daily_data['datum'].dt.isocalendar().week
+        daily_data['Quarter'] = daily_data['datum'].dt.quarter
+        
+        # Get medicine categories from the data
+        self.medicine_categories = [col for col in daily_data.columns if col not in 
+                                  ['datum', 'Year', 'Month', 'Hour', 'Weekday Name', 'Weekday_encoded', 
+                                   'Day_of_month', 'Week_of_year', 'Quarter']]
+        
+        # Add lag features for time series analysis
+        for category in self.medicine_categories:
+            daily_data[f'{category}_lag_1'] = daily_data[category].shift(1)
+            daily_data[f'{category}_lag_7'] = daily_data[category].shift(7)
+            daily_data[f'{category}_lag_30'] = daily_data[category].shift(30)
+            
+            # Rolling averages
+            daily_data[f'{category}_rolling_7'] = daily_data[category].rolling(window=7).mean()
+            daily_data[f'{category}_rolling_30'] = daily_data[category].rolling(window=30).mean()
+        
+        # Drop rows with NaN values (from lag features)
+        daily_data = daily_data.dropna()
+        
+        return daily_data
+    
+    def prepare_features(self, data, target_category):
+        """Prepare features for a specific medicine category"""
+        feature_cols = self.feature_columns + [
+            'Day_of_month', 'Week_of_year', 'Quarter',
+            f'{target_category}_lag_1', f'{target_category}_lag_7', f'{target_category}_lag_30',
+            f'{target_category}_rolling_7', f'{target_category}_rolling_30'
+        ]
+        
+        # Add other categories as features
+        for category in self.medicine_categories:
+            if category != target_category:
+                feature_cols.extend([
+                    f'{category}_lag_1', f'{category}_lag_7', f'{category}_lag_30',
+                    f'{category}_rolling_7', f'{category}_rolling_30'
+                ])
+        
+        return feature_cols
+    
+    def train_models(self):
+        """Train separate models for each medicine category"""
+        print("Training ML models for medicine restocking prediction...")
+        
+        # Load and preprocess data
+        data = self.load_and_preprocess_data()
+        
+        for category in self.medicine_categories:
+            print(f"\nTraining model for {category}...")
+            
+            # Prepare features
+            feature_cols = self.prepare_features(data, category)
+            X = data[feature_cols]
+            y = data[category]
+            
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+            
+            # Scale features
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Train model
+            model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=10,
+                random_state=42,
+                n_jobs=-1
+            )
+            
+            model.fit(X_train_scaled, y_train)
+            
+            # Evaluate model
+            y_pred = model.predict(X_test_scaled)
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            r2 = r2_score(y_test, y_pred)
+            
+            print(f"  MAE: {mae:.2f}")
+            print(f"  RMSE: {rmse:.2f}")
+            print(f"  R²: {r2:.3f}")
+            
+            # Save model and scaler
+            self.models[category] = model
+            self.scalers[category] = scaler
+            
+            # Save to disk
+            joblib.dump(model, f'{self.model_path}{category}_model.pkl')
+            joblib.dump(scaler, f'{self.scaler_path}{category}_scaler.pkl')
+        
+        print("\nAll models trained and saved successfully!")
+    
+    def load_models(self):
+        """Load trained models from disk"""
+        print("Loading trained models...")
+        
+        # First, get the medicine categories from data
         try:
-            df = pd.read_csv(file_path)
-        except FileNotFoundError:
-            print(f"File {file_path} not found. Creating sample data...")
-            df = self._create_sample_data()
+            data = self.load_and_preprocess_data()
+            self.medicine_categories = [col for col in data.columns if col not in 
+                                      ['datum', 'Year', 'Month', 'Hour', 'Weekday Name', 'Weekday_encoded', 
+                                       'Day_of_month', 'Week_of_year', 'Quarter']]
+        except:
+            # Fallback to default categories if data loading fails
+            self.medicine_categories = ['M01AB', 'M01AE', 'N02BA', 'N02BE', 'N05B', 'N05C', 'R03', 'R06']
         
-        print(f"Dataset shape: {df.shape}")
-        print(f"Columns: {df.columns.tolist()}")
-        
-        # Display basic info
-        print("\nDataset Info:")
-        print(df.info())
-        print("\nFirst few rows:")
-        print(df.head())
-        
-        return df
-    
-    def _create_sample_data(self):
-        """
-        Create sample medicine inventory data for demonstration
-        """
-        np.random.seed(42)
-        n_samples = 10000
-        
-        # Generate sample data
-        medicines = [
-            'Paracetamol', 'Ibuprofen', 'Aspirin', 'Omeprazole', 'Metformin',
-            'Amlodipine', 'Lisinopril', 'Atorvastatin', 'Metoprolol', 'Losartan',
-            'Hydrochlorothiazide', 'Sertraline', 'Escitalopram', 'Bupropion', 'Venlafaxine',
-            'Albuterol', 'Fluticasone', 'Montelukast', 'Cetirizine', 'Loratadine'
-        ]
-        
-        categories = ['Pain Relief', 'Cardiovascular', 'Diabetes', 'Mental Health', 'Respiratory']
-        
-        data = {
-            'medicine_id': range(1, n_samples + 1),
-            'medicine_name': np.random.choice(medicines, n_samples),
-            'category': np.random.choice(categories, n_samples),
-            'current_stock': np.random.randint(0, 500, n_samples),
-            'daily_consumption': np.random.randint(1, 50, n_samples),
-            'days_since_last_restock': np.random.randint(1, 90, n_samples),
-            'supplier_lead_time': np.random.randint(1, 30, n_samples),
-            'unit_cost': np.random.uniform(0.5, 50, n_samples),
-            'shelf_life_days': np.random.randint(30, 1095, n_samples),
-            'temperature_sensitive': np.random.choice([0, 1], n_samples),
-            'critical_medicine': np.random.choice([0, 1], n_samples),
-            'seasonal_demand': np.random.choice([0, 1], n_samples),
-            'month': np.random.randint(1, 13, n_samples),
-            'day_of_week': np.random.randint(0, 7, n_samples),
-            'is_weekend': np.random.choice([0, 1], n_samples),
-            'days_to_expiry': np.random.randint(1, 365, n_samples),
-            'restock_amount': np.random.randint(50, 1000, n_samples),
-            'days_until_restock': np.random.randint(1, 30, n_samples)
-        }
-        
-        df = pd.DataFrame(data)
-        
-        # Add some realistic patterns
-        df['stock_level_percentage'] = (df['current_stock'] / (df['daily_consumption'] * 30)) * 100
-        df['consumption_rate'] = df['daily_consumption'] / df['current_stock'].replace(0, 1)
-        df['urgency_score'] = (100 - df['stock_level_percentage']) + (df['critical_medicine'] * 50)
-        
-        return df
-    
-    def feature_engineering(self, df):
-        """
-        Create additional features for better prediction
-        """
-        print("Performing feature engineering...")
-        
-        # Create new features
-        df['stock_to_consumption_ratio'] = df['current_stock'] / df['daily_consumption'].replace(0, 1)
-        df['days_of_stock_remaining'] = df['current_stock'] / df['daily_consumption'].replace(0, 1)
-        df['restock_urgency'] = np.where(df['days_of_stock_remaining'] < 7, 3,
-                                        np.where(df['days_of_stock_remaining'] < 14, 2, 1))
-        
-        # Seasonal features
-        df['is_winter'] = df['month'].isin([12, 1, 2]).astype(int)
-        df['is_summer'] = df['month'].isin([6, 7, 8]).astype(int)
-        df['is_flu_season'] = df['month'].isin([10, 11, 12, 1, 2, 3]).astype(int)
-        
-        # Risk features
-        df['expiry_risk'] = np.where(df['days_to_expiry'] < 30, 3,
-                                   np.where(df['days_to_expiry'] < 90, 2, 1))
-        df['supply_risk'] = np.where(df['supplier_lead_time'] > 14, 3,
-                                   np.where(df['supplier_lead_time'] > 7, 2, 1))
-        
-        # Interaction features
-        df['critical_temp_sensitive'] = df['critical_medicine'] * df['temperature_sensitive']
-        df['seasonal_critical'] = df['seasonal_demand'] * df['critical_medicine']
-        
-        return df
-    
-    def prepare_features(self, df):
-        """
-        Prepare features for ML models
-        """
-        print("Preparing features for ML models...")
-        
-        # Select features for prediction
-        feature_columns = [
-            'current_stock', 'daily_consumption', 'days_since_last_restock',
-            'supplier_lead_time', 'unit_cost', 'shelf_life_days', 'temperature_sensitive',
-            'critical_medicine', 'seasonal_demand', 'month', 'day_of_week', 'is_weekend',
-            'days_to_expiry', 'stock_level_percentage', 'consumption_rate', 'urgency_score',
-            'stock_to_consumption_ratio', 'days_of_stock_remaining', 'restock_urgency',
-            'is_winter', 'is_summer', 'is_flu_season', 'expiry_risk', 'supply_risk',
-            'critical_temp_sensitive', 'seasonal_critical'
-        ]
-        
-        # Categorical features
-        categorical_features = ['medicine_name', 'category']
-        
-        # Encode categorical features
-        for feature in categorical_features:
-            if feature in df.columns:
-                le = LabelEncoder()
-                df[f'{feature}_encoded'] = le.fit_transform(df[feature].astype(str))
-                self.label_encoders[feature] = le
-                feature_columns.append(f'{feature}_encoded')
-        
-        # Target variables
-        y_restock_amount = df['restock_amount']
-        y_days_until_restock = df['days_until_restock']
-        
-        # Prepare X
-        X = df[feature_columns].copy()
-        
-        # Handle missing values
-        X = X.fillna(X.mean())
-        
-        return X, y_restock_amount, y_days_until_restock
-    
-    def train_models(self, X, y_restock_amount, y_days_until_restock):
-        """
-        Train multiple ML models for both restock amount and days until restock
-        """
-        print("Training ML models...")
-        
-        # Split data
-        X_train, X_test, y_restock_train, y_restock_test = train_test_split(
-            X, y_restock_amount, test_size=0.2, random_state=42
-        )
-        
-        X_train, X_test, y_days_train, y_days_test = train_test_split(
-            X, y_days_until_restock, test_size=0.2, random_state=42
-        )
-        
-        # Scale features
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
-        
-        # Define models
-        models = {
-            'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
-            'Gradient Boosting': GradientBoostingRegressor(random_state=42),
-            'XGBoost': xgb.XGBRegressor(random_state=42),
-            'LightGBM': lgb.LGBMRegressor(random_state=42),
-            'Linear Regression': LinearRegression(),
-            'Ridge Regression': Ridge(),
-            'Lasso Regression': Lasso()
-        }
-        
-        # Train models for restock amount prediction
-        print("\nTraining models for restock amount prediction...")
-        restock_results = {}
-        
-        for name, model in models.items():
-            print(f"Training {name}...")
-            model.fit(X_train_scaled, y_restock_train)
-            y_pred = model.predict(X_test_scaled)
+        for category in self.medicine_categories:
+            model_file = f'{self.model_path}{category}_model.pkl'
+            scaler_file = f'{self.scaler_path}{category}_scaler.pkl'
             
-            mse = mean_squared_error(y_restock_test, y_pred)
-            mae = mean_absolute_error(y_restock_test, y_pred)
-            r2 = r2_score(y_restock_test, y_pred)
-            
-            restock_results[name] = {
-                'model': model,
-                'mse': mse,
-                'mae': mae,
-                'r2': r2,
-                'predictions': y_pred
-            }
-            
-            print(f"  {name} - MSE: {mse:.2f}, MAE: {mae:.2f}, R²: {r2:.3f}")
+            if os.path.exists(model_file) and os.path.exists(scaler_file):
+                self.models[category] = joblib.load(model_file)
+                self.scalers[category] = joblib.load(scaler_file)
+                print(f"  Loaded model for {category}")
+            else:
+                print(f"  Model for {category} not found. Please train models first.")
+                return False
         
-        # Train models for days until restock prediction
-        print("\nTraining models for days until restock prediction...")
-        days_results = {}
-        
-        for name, model in models.items():
-            print(f"Training {name}...")
-            model.fit(X_train_scaled, y_days_train)
-            y_pred = model.predict(X_test_scaled)
-            
-            mse = mean_squared_error(y_days_test, y_pred)
-            mae = mean_absolute_error(y_days_test, y_pred)
-            r2 = r2_score(y_days_test, y_pred)
-            
-            days_results[name] = {
-                'model': model,
-                'mse': mse,
-                'mae': mae,
-                'r2': r2,
-                'predictions': y_pred
-            }
-            
-            print(f"  {name} - MSE: {mse:.2f}, MAE: {mae:.2f}, R²: {r2:.3f}")
-        
-        # Find best models
-        best_restock_model = max(restock_results.items(), key=lambda x: x[1]['r2'])
-        best_days_model = max(days_results.items(), key=lambda x: x[1]['r2'])
-        
-        print(f"\nBest model for restock amount: {best_restock_model[0]} (R²: {best_restock_model[1]['r2']:.3f})")
-        print(f"Best model for days until restock: {best_days_model[0]} (R²: {best_days_model[1]['r2']:.3f})")
-        
-        self.models = {
-            'restock_amount': restock_results,
-            'days_until_restock': days_results
-        }
-        
-        return restock_results, days_results
+        return True
     
-    def feature_importance_analysis(self, X):
-        """
-        Analyze feature importance
-        """
-        print("Analyzing feature importance...")
+    def predict_for_inventory_items(self, inventory_items):
+        """Predict restocking needs for actual inventory items"""
+        if not self.models:
+            print("No models loaded. Please train or load models first.")
+            return None
         
-        # Use Random Forest for feature importance
-        rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
-        rf_model.fit(X, self.models['restock_amount']['Random Forest']['model'].predict(self.scaler.transform(X)))
+        # Load recent data for prediction
+        data = self.load_and_preprocess_data()
         
-        # Get feature importance
-        importance = rf_model.feature_importances_
-        feature_names = X.columns
+        # Get the latest data point
+        latest_data = data.iloc[-1:].copy()
         
-        # Create feature importance DataFrame
-        feature_importance_df = pd.DataFrame({
-            'feature': feature_names,
-            'importance': importance
-        }).sort_values('importance', ascending=False)
+        predictions = {}
         
-        self.feature_importance = feature_importance_df
+        # Map inventory items to medicine categories
+        inventory_mapping = self._map_inventory_to_categories(inventory_items)
         
-        return feature_importance_df
-    
-    def create_visualizations(self, df, restock_results, days_results, feature_importance_df):
-        """
-        Create comprehensive visualizations
-        """
-        print("Creating visualizations...")
-        
-        # Set up the plotting style
-        plt.style.use('seaborn-v0_8')
-        fig, axes = plt.subplots(2, 3, figsize=(20, 12))
-        
-        # 1. Stock Level Distribution
-        axes[0, 0].hist(df['stock_level_percentage'], bins=30, alpha=0.7, color='skyblue')
-        axes[0, 0].set_title('Stock Level Distribution')
-        axes[0, 0].set_xlabel('Stock Level (%)')
-        axes[0, 0].set_ylabel('Frequency')
-        
-        # 2. Consumption vs Stock
-        axes[0, 1].scatter(df['current_stock'], df['daily_consumption'], alpha=0.6)
-        axes[0, 1].set_title('Current Stock vs Daily Consumption')
-        axes[0, 1].set_xlabel('Current Stock')
-        axes[0, 1].set_ylabel('Daily Consumption')
-        
-        # 3. Restock Amount Distribution
-        axes[0, 2].hist(df['restock_amount'], bins=30, alpha=0.7, color='lightgreen')
-        axes[0, 2].set_title('Restock Amount Distribution')
-        axes[0, 2].set_xlabel('Restock Amount')
-        axes[0, 2].set_ylabel('Frequency')
-        
-        # 4. Model Performance Comparison (Restock Amount)
-        model_names = list(restock_results.keys())
-        r2_scores = [restock_results[name]['r2'] for name in model_names]
-        
-        axes[1, 0].bar(model_names, r2_scores, color='lightcoral')
-        axes[1, 0].set_title('Model Performance - Restock Amount')
-        axes[1, 0].set_ylabel('R² Score')
-        axes[1, 0].tick_params(axis='x', rotation=45)
-        
-        # 5. Model Performance Comparison (Days Until Restock)
-        model_names = list(days_results.keys())
-        r2_scores = [days_results[name]['r2'] for name in model_names]
-        
-        axes[1, 1].bar(model_names, r2_scores, color='lightblue')
-        axes[1, 1].set_title('Model Performance - Days Until Restock')
-        axes[1, 1].set_ylabel('R² Score')
-        axes[1, 1].tick_params(axis='x', rotation=45)
-        
-        # 6. Feature Importance
-        top_features = feature_importance_df.head(10)
-        axes[1, 2].barh(top_features['feature'], top_features['importance'], color='lightyellow')
-        axes[1, 2].set_title('Top 10 Feature Importance')
-        axes[1, 2].set_xlabel('Importance')
-        
-        plt.tight_layout()
-        plt.savefig('ml_models/medicine_restocking_analysis.png', dpi=300, bbox_inches='tight')
-        plt.show()
-        
-        # Create interactive Plotly visualizations
-        self._create_interactive_plots(df, restock_results, days_results, feature_importance_df)
-    
-    def _create_interactive_plots(self, df, restock_results, days_results, feature_importance_df):
-        """
-        Create interactive Plotly visualizations
-        """
-        # 1. Stock Level vs Restock Amount
-        fig1 = px.scatter(df, x='stock_level_percentage', y='restock_amount', 
-                          color='critical_medicine', size='daily_consumption',
-                          title='Stock Level vs Restock Amount',
-                          labels={'stock_level_percentage': 'Stock Level (%)', 
-                                 'restock_amount': 'Restock Amount'})
-        fig1.write_html('ml_models/stock_vs_restock.html')
-        
-        # 2. Model Performance Comparison
-        fig2 = make_subplots(rows=1, cols=2, subplot_titles=('Restock Amount Prediction', 'Days Until Restock Prediction'))
-        
-        # Restock amount models
-        model_names = list(restock_results.keys())
-        r2_scores = [restock_results[name]['r2'] for name in model_names]
-        
-        fig2.add_trace(go.Bar(x=model_names, y=r2_scores, name='Restock Amount'), row=1, col=1)
-        
-        # Days until restock models
-        model_names = list(days_results.keys())
-        r2_scores = [days_results[name]['r2'] for name in model_names]
-        
-        fig2.add_trace(go.Bar(x=model_names, y=r2_scores, name='Days Until Restock'), row=1, col=2)
-        
-        fig2.update_layout(title='Model Performance Comparison', height=500)
-        fig2.write_html('ml_models/model_performance.html')
-        
-        # 3. Feature Importance
-        top_features = feature_importance_df.head(15)
-        fig3 = px.bar(top_features, x='importance', y='feature', orientation='h',
-                      title='Feature Importance Analysis')
-        fig3.write_html('ml_models/feature_importance.html')
-        
-        print("Interactive visualizations saved to ml_models/ directory")
-    
-    def predict_restocking_needs(self, medicine_data):
-        """
-        Predict restocking needs for new medicine data
-        """
-        print("Predicting restocking needs...")
-        
-        # Prepare features
-        X_new = self.feature_engineering(medicine_data)
-        X_new = self.prepare_features(X_new)[0]
-        X_new_scaled = self.scaler.transform(X_new)
-        
-        # Get best models
-        best_restock_model = max(self.models['restock_amount'].items(), key=lambda x: x[1]['r2'])[1]['model']
-        best_days_model = max(self.models['days_until_restock'].items(), key=lambda x: x[1]['r2'])[1]['model']
-        
-        # Make predictions
-        restock_amount_pred = best_restock_model.predict(X_new_scaled)
-        days_until_restock_pred = best_days_model.predict(X_new_scaled)
-        
-        # Create prediction results
-        predictions = pd.DataFrame({
-            'medicine_name': medicine_data['medicine_name'],
-            'current_stock': medicine_data['current_stock'],
-            'predicted_restock_amount': restock_amount_pred,
-            'predicted_days_until_restock': days_until_restock_pred,
-            'urgency_level': np.where(days_until_restock_pred < 7, 'High',
-                                    np.where(days_until_restock_pred < 14, 'Medium', 'Low'))
-        })
+        for item in inventory_items:
+            # Find the best matching category for this inventory item
+            category = self._find_best_category_match(item, inventory_mapping)
+            
+            if category and category in self.models:
+                model = self.models[category]
+                scaler = self.scalers[category]
+                
+                # Prepare features for prediction
+                feature_cols = self.prepare_features(data, category)
+                X_pred = latest_data[feature_cols]
+                X_pred_scaled = scaler.transform(X_pred)
+                
+                # Make prediction
+                predicted_demand = model.predict(X_pred_scaled)[0]
+                
+                # Calculate restocking threshold (e.g., 7 days of average demand)
+                avg_demand = data[category].tail(30).mean()
+                restocking_threshold = avg_demand * 7
+                
+                # Use actual inventory stock
+                current_stock = item.stock
+                restocking_needed = current_stock < restocking_threshold
+                
+                predictions[item.name] = {
+                    'category': category,
+                    'predicted_demand': predicted_demand,
+                    'current_stock': current_stock,
+                    'restocking_threshold': restocking_threshold,
+                    'restocking_needed': restocking_needed,
+                    'days_until_stockout': max(0, int((current_stock - restocking_threshold) / avg_demand)) if avg_demand > 0 else 0,
+                    'threshold': item.threshold,
+                    'status': item.status
+                }
+            else:
+                # Fallback prediction for items without matching categories
+                predictions[item.name] = {
+                    'category': 'Unknown',
+                    'predicted_demand': 10.0,  # Default prediction
+                    'current_stock': item.stock,
+                    'restocking_threshold': item.threshold * 0.7,
+                    'restocking_needed': item.stock < item.threshold,
+                    'days_until_stockout': max(0, int((item.stock - item.threshold) / 10)) if item.stock > 0 else 0,
+                    'threshold': item.threshold,
+                    'status': item.status
+                }
         
         return predictions
     
-    def save_models(self):
-        """
-        Save trained models
-        """
-        import joblib
+    def _map_inventory_to_categories(self, inventory_items):
+        """Map inventory items to medicine categories based on names and categories"""
+        mapping = {}
         
-        print("Saving models...")
+        # Medicine category descriptions
+        category_descriptions = {
+            'M01AB': 'anti-inflammatory antirheumatic non-steroids',
+            'M01AE': 'anti-inflammatory antirheumatic acetic acid',
+            'N02BA': 'analgesics anilides paracetamol',
+            'N02BE': 'analgesics pyrazolones salicylic acid',
+            'N05B': 'anxiolytics benzodiazepine',
+            'N05C': 'hypnotics sedatives',
+            'R03': 'obstructive airway diseases',
+            'R06': 'antihistamines systemic'
+        }
         
-        # Save the best models
-        best_restock_model = max(self.models['restock_amount'].items(), key=lambda x: x[1]['r2'])[1]['model']
-        best_days_model = max(self.models['days_until_restock'].items(), key=lambda x: x[1]['r2'])[1]['model']
+        for item in inventory_items:
+            best_match = None
+            best_score = 0
+            
+            # Check item name against category descriptions
+            item_lower = item.name.lower()
+            
+            for category, description in category_descriptions.items():
+                score = 0
+                desc_words = description.lower().split()
+                
+                for word in desc_words:
+                    if word in item_lower:
+                        score += 1
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = category
+            
+            # Also check item category
+            if item.category:
+                category_lower = item.category.lower()
+                for category, description in category_descriptions.items():
+                    if any(word in category_lower for word in description.split()):
+                        best_match = category
+                        break
+            
+            mapping[item.name] = best_match
         
-        joblib.dump(best_restock_model, 'ml_models/best_restock_amount_model.pkl')
-        joblib.dump(best_days_model, 'ml_models/best_days_until_restock_model.pkl')
-        joblib.dump(self.scaler, 'ml_models/scaler.pkl')
-        joblib.dump(self.label_encoders, 'ml_models/label_encoders.pkl')
+        return mapping
+    
+    def _find_best_category_match(self, item, mapping):
+        """Find the best matching category for an inventory item"""
+        return mapping.get(item.name)
+    
+    def predict_restocking_needs(self, days_ahead=30):
+        """Predict restocking needs for the next N days (legacy method)"""
+        if not self.models:
+            print("No models loaded. Please train or load models first.")
+            return None
         
-        # Save feature importance
-        self.feature_importance.to_csv('ml_models/feature_importance.csv', index=False)
+        # Load recent data for prediction
+        data = self.load_and_preprocess_data()
         
-        print("Models saved successfully!")
+        # Get the latest data point
+        latest_data = data.iloc[-1:].copy()
+        
+        predictions = {}
+        
+        for category in self.medicine_categories:
+            if category not in self.models:
+                continue
+            
+            model = self.models[category]
+            scaler = self.scalers[category]
+            
+            # Prepare features for prediction
+            feature_cols = self.prepare_features(data, category)
+            X_pred = latest_data[feature_cols]
+            X_pred_scaled = scaler.transform(X_pred)
+            
+            # Make prediction
+            prediction = model.predict(X_pred_scaled)[0]
+            
+            # Calculate restocking threshold (e.g., 7 days of average demand)
+            avg_demand = data[category].tail(30).mean()
+            restocking_threshold = avg_demand * 7
+            
+            # Determine if restocking is needed
+            current_stock = prediction  # Simplified assumption
+            restocking_needed = current_stock < restocking_threshold
+            
+            predictions[category] = {
+                'predicted_demand': prediction,
+                'current_stock': current_stock,
+                'restocking_threshold': restocking_threshold,
+                'restocking_needed': restocking_needed,
+                'days_until_stockout': max(0, int((current_stock - restocking_threshold) / avg_demand)) if avg_demand > 0 else 0
+            }
+        
+        return predictions
+    
+    def get_medicine_info(self):
+        """Get information about medicine categories"""
+        medicine_info = {
+            'M01AB': 'Anti-inflammatory and antirheumatic products, non-steroids',
+            'M01AE': 'Anti-inflammatory and antirheumatic products, acetic acid derivatives',
+            'N02BA': 'Analgesics, anilides (paracetamol)',
+            'N02BE': 'Analgesics, pyrazolones and pyrazolones with salicylic acid',
+            'N05B': 'Anxiolytics, benzodiazepine derivatives',
+            'N05C': 'Hypnotics and sedatives',
+            'R03': 'Drugs for obstructive airway diseases',
+            'R06': 'Antihistamines for systemic use'
+        }
+        return medicine_info
+    
+    def generate_restocking_report(self, predictions):
+        """Generate a comprehensive restocking report"""
+        if not predictions:
+            return "No predictions available."
+        
+        report = "=== MEDICINE RESTOCKING PREDICTION REPORT ===\n\n"
+        report += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        
+        medicine_info = self.get_medicine_info()
+        
+        # Categorize by urgency
+        urgent = []
+        moderate = []
+        safe = []
+        
+        for item_name, pred in predictions.items():
+            if pred['restocking_needed']:
+                if pred['days_until_stockout'] <= 7:
+                    urgent.append((item_name, pred))
+                elif pred['days_until_stockout'] <= 14:
+                    moderate.append((item_name, pred))
+            else:
+                safe.append((item_name, pred))
+        
+        # Urgent restocking needed
+        if urgent:
+            report += "🚨 URGENT RESTOCKING NEEDED:\n"
+            report += "=" * 40 + "\n"
+            for item_name, pred in urgent:
+                info = medicine_info.get(pred.get('category', ''), pred.get('category', 'Unknown'))
+                report += f"• {item_name} ({info})\n"
+                report += f"  - Predicted demand: {pred['predicted_demand']:.2f} units\n"
+                report += f"  - Current stock: {pred['current_stock']:.2f} units\n"
+                report += f"  - Days until stockout: {pred['days_until_stockout']} days\n"
+                report += f"  - Restocking threshold: {pred['restocking_threshold']:.2f} units\n\n"
+        
+        # Moderate restocking needed
+        if moderate:
+            report += "⚠️ MODERATE RESTOCKING NEEDED:\n"
+            report += "=" * 40 + "\n"
+            for item_name, pred in moderate:
+                info = medicine_info.get(pred.get('category', ''), pred.get('category', 'Unknown'))
+                report += f"• {item_name} ({info})\n"
+                report += f"  - Predicted demand: {pred['predicted_demand']:.2f} units\n"
+                report += f"  - Current stock: {pred['current_stock']:.2f} units\n"
+                report += f"  - Days until stockout: {pred['days_until_stockout']} days\n\n"
+        
+        # Safe stock levels
+        if safe:
+            report += "✅ SAFE STOCK LEVELS:\n"
+            report += "=" * 40 + "\n"
+            for item_name, pred in safe:
+                info = medicine_info.get(pred.get('category', ''), pred.get('category', 'Unknown'))
+                report += f"• {item_name} ({info})\n"
+                report += f"  - Predicted demand: {pred['predicted_demand']:.2f} units\n"
+                report += f"  - Current stock: {pred['current_stock']:.2f} units\n\n"
+        
+        # Summary
+        report += "📊 SUMMARY:\n"
+        report += "=" * 40 + "\n"
+        report += f"• Urgent restocking needed: {len(urgent)} items\n"
+        report += f"• Moderate restocking needed: {len(moderate)} items\n"
+        report += f"• Safe stock levels: {len(safe)} items\n"
+        report += f"• Total items monitored: {len(predictions)}\n"
+        
+        return report
 
 def main():
-    """
-    Main function to run the medicine restocking predictor
-    """
-    print("=== Medicine Restocking Prediction System ===")
-    
-    # Initialize the predictor
+    """Main function to train models and generate predictions"""
     predictor = MedicineRestockingPredictor()
     
-    # Load and preprocess data
-    df = predictor.load_and_preprocess_data('data/medicine_inventory.csv')
+    # Check if models exist, if not train them
+    if not predictor.load_models():
+        print("Training new models...")
+        predictor.train_models()
+        predictor.load_models()
     
-    # Feature engineering
-    df = predictor.feature_engineering(df)
+    # Generate predictions
+    print("\nGenerating restocking predictions...")
+    predictions = predictor.predict_restocking_needs(days_ahead=30)
     
-    # Prepare features
-    X, y_restock_amount, y_days_until_restock = predictor.prepare_features(df)
-    
-    # Train models
-    restock_results, days_results = predictor.train_models(X, y_restock_amount, y_days_until_restock)
-    
-    # Feature importance analysis
-    feature_importance_df = predictor.feature_importance_analysis(X)
-    
-    # Create visualizations
-    predictor.create_visualizations(df, restock_results, days_results, feature_importance_df)
-    
-    # Save models
-    predictor.save_models()
-    
-    # Example prediction
-    print("\n=== Example Prediction ===")
-    sample_data = df.head(5)
-    predictions = predictor.predict_restocking_needs(sample_data)
-    print(predictions)
-    
-    print("\n=== System Complete ===")
-    print("Models trained and saved successfully!")
-    print("Visualizations created and saved!")
-    print("Ready for production use!")
+    if predictions:
+        # Generate and print report
+        report = predictor.generate_restocking_report(predictions)
+        print(report)
+        
+        # Save report to file
+        with open('ml_models/restocking_report.txt', 'w') as f:
+            f.write(report)
+        
+        print("Report saved to ml_models/restocking_report.txt")
+        
+        return predictions
+    else:
+        print("Failed to generate predictions.")
+        return None
 
 if __name__ == "__main__":
     main() 

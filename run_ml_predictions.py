@@ -1,95 +1,177 @@
 #!/usr/bin/env python3
 """
-Medicine Restocking ML Predictions Runner
-This script runs the ML model training and generates predictions
+Medicine Restocking Prediction Runner
+Uses sales data from archive folder to predict restocking needs
 """
 
 import sys
 import os
+import json
+from datetime import datetime
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 
-# Add the ml_models directory to the path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'ml_models'))
+# Add the current directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from medicine_restocking_predictor import MedicineRestockingPredictor
+from ml_models.medicine_restocking_predictor import MedicineRestockingPredictor
 
-def main():
-    """
-    Main function to run the ML predictions
-    """
-    print("=== Medicine Restocking ML Predictions ===")
-    print(f"Started at: {datetime.now()}")
-    
+def run_predictions():
+    """Run ML predictions and return results as JSON"""
     try:
-        # Initialize the predictor
+        print("Starting medicine restocking predictions...")
+        
+        # Initialize predictor
         predictor = MedicineRestockingPredictor()
         
-        # Create sample data file path
-        data_file = 'data/medicine_inventory.csv'
+        # Check if models exist, if not train them
+        if not predictor.load_models():
+            print("Training new models...")
+            predictor.train_models()
+            predictor.load_models()
         
-        # Ensure data directory exists
-        os.makedirs('data', exist_ok=True)
+        # Generate predictions
+        print("Generating restocking predictions...")
+        predictions = predictor.predict_restocking_needs(days_ahead=30)
         
-        # Load and preprocess data
-        print("\n1. Loading and preprocessing data...")
-        df = predictor.load_and_preprocess_data(data_file)
+        if not predictions:
+            return {
+                "success": False,
+                "error": "Failed to generate predictions",
+                "timestamp": datetime.now().isoformat()
+            }
         
-        # Feature engineering
-        print("\n2. Performing feature engineering...")
-        df = predictor.feature_engineering(df)
+        # Generate report
+        report = predictor.generate_restocking_report(predictions)
         
-        # Prepare features
-        print("\n3. Preparing features for ML models...")
-        X, y_restock_amount, y_days_until_restock = predictor.prepare_features(df)
+        # Save report to file
+        os.makedirs('ml_models', exist_ok=True)
+        with open('ml_models/restocking_report.txt', 'w') as f:
+            f.write(report)
         
-        # Train models
-        print("\n4. Training ML models...")
-        restock_results, days_results = predictor.train_models(X, y_restock_amount, y_days_until_restock)
+        # Prepare results for frontend
+        medicine_info = predictor.get_medicine_info()
         
-        # Feature importance analysis
-        print("\n5. Analyzing feature importance...")
-        feature_importance_df = predictor.feature_importance_analysis(X)
+        # Categorize predictions
+        urgent = []
+        moderate = []
+        safe = []
         
-        # Create visualizations
-        print("\n6. Creating visualizations...")
-        predictor.create_visualizations(df, restock_results, days_results, feature_importance_df)
+        for category, pred in predictions.items():
+            category_info = {
+                "category": category,
+                "description": medicine_info.get(category, category),
+                "predicted_demand": round(pred['predicted_demand'], 2),
+                "current_stock": round(pred['current_stock'], 2),
+                "restocking_threshold": round(pred['restocking_threshold'], 2),
+                "restocking_needed": pred['restocking_needed'],
+                "days_until_stockout": pred['days_until_stockout']
+            }
+            
+            if pred['restocking_needed']:
+                if pred['days_until_stockout'] <= 7:
+                    urgent.append(category_info)
+                elif pred['days_until_stockout'] <= 14:
+                    moderate.append(category_info)
+            else:
+                safe.append(category_info)
         
-        # Save models
-        print("\n7. Saving trained models...")
-        predictor.save_models()
+        # Create summary
+        summary = {
+            "total_categories": len(predictions),
+            "urgent_restocking": len(urgent),
+            "moderate_restocking": len(moderate),
+            "safe_stock_levels": len(safe),
+            "timestamp": datetime.now().isoformat()
+        }
         
-        # Generate sample predictions
-        print("\n8. Generating sample predictions...")
-        sample_data = df.head(10)
-        predictions = predictor.predict_restocking_needs(sample_data)
+        # Prepare final results
+        results = {
+            "success": True,
+            "summary": summary,
+            "predictions": {
+                "urgent": urgent,
+                "moderate": moderate,
+                "safe": safe
+            },
+            "report": report,
+            "timestamp": datetime.now().isoformat()
+        }
         
-        # Save predictions to CSV
-        predictions.to_csv('data/sample_predictions.csv', index=False)
-        print(f"Sample predictions saved to: data/sample_predictions.csv")
+        # Save results as JSON for frontend
+        with open('ml_models/prediction_results.json', 'w') as f:
+            json.dump(results, f, indent=2)
         
-        # Print summary
-        print("\n=== ML Predictions Summary ===")
-        print(f"✓ Models trained successfully")
-        print(f"✓ Best restock amount model: {max(restock_results.items(), key=lambda x: x[1]['r2'])[0]}")
-        print(f"✓ Best days until restock model: {max(days_results.items(), key=lambda x: x[1]['r2'])[0]}")
-        print(f"✓ Feature importance analysis completed")
-        print(f"✓ Visualizations created")
-        print(f"✓ Models saved to ml_models/ directory")
-        print(f"✓ Sample predictions generated")
+        print("Predictions completed successfully!")
+        print(f"Summary: {summary['urgent_restocking']} urgent, {summary['moderate_restocking']} moderate, {summary['safe_stock_levels']} safe")
         
-        print(f"\nCompleted at: {datetime.now()}")
-        print("🎉 ML Predictions system is ready!")
+        return results
         
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return 1
+        error_result = {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Save error to file
+        with open('ml_models/prediction_error.json', 'w') as f:
+            json.dump(error_result, f, indent=2)
+        
+        print(f"Error during predictions: {e}")
+        return error_result
+
+def get_prediction_results():
+    """Get the latest prediction results"""
+    try:
+        # Try to load results from file
+        if os.path.exists('ml_models/prediction_results.json'):
+            with open('ml_models/prediction_results.json', 'r') as f:
+                return json.load(f)
+        else:
+            return {
+                "success": False,
+                "error": "No prediction results found. Run predictions first.",
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error loading results: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+def main():
+    """Main function"""
+    print("=== Medicine Restocking Prediction Runner ===")
     
-    return 0
+    # Run predictions
+    results = run_predictions()
+    
+    if results["success"]:
+        print("\n✅ Predictions completed successfully!")
+        print(f"📊 Summary: {results['summary']}")
+        
+        # Print urgent items
+        if results['predictions']['urgent']:
+            print("\n🚨 URGENT RESTOCKING NEEDED:")
+            for item in results['predictions']['urgent']:
+                print(f"  • {item['category']}: {item['description']}")
+                print(f"    Days until stockout: {item['days_until_stockout']}")
+        
+        # Print moderate items
+        if results['predictions']['moderate']:
+            print("\n⚠️ MODERATE RESTOCKING NEEDED:")
+            for item in results['predictions']['moderate']:
+                print(f"  • {item['category']}: {item['description']}")
+                print(f"    Days until stockout: {item['days_until_stockout']}")
+        
+        print(f"\n📄 Report saved to: ml_models/restocking_report.txt")
+        print(f"📄 Results saved to: ml_models/prediction_results.json")
+        
+    else:
+        print(f"\n❌ Predictions failed: {results['error']}")
+    
+    return results
 
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code) 
+    main() 

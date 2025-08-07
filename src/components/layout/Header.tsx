@@ -1,4 +1,4 @@
-import { Bell, Search, Shield, User } from "lucide-react";
+import { Bell, Search, Shield, User, Brain, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
@@ -24,6 +24,20 @@ export const Header = () => {
             className="pl-9 w-64 bg-muted/50 border-border"
           />
         </div>
+        
+        <Link to="/infinite-memory">
+          <Button variant="outline" className="font-semibold">
+            <Brain className="h-4 w-4 mr-2" />
+            Infinite Memory
+          </Button>
+        </Link>
+
+        <Link to="/ml-predictions">
+          <Button variant="outline" className="font-semibold">
+            <TrendingUp className="h-4 w-4 mr-2" />
+            ML Predictions
+          </Button>
+        </Link>
         
         <Link to="/marketplace">
           <Button variant="default" className="font-semibold">

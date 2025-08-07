@@ -20,6 +20,7 @@ export interface ProductListing {
   blockchainVerified: boolean;
   inventoryLevel: number;
   contractAddress: string;
+  rating?: number;
 }
 
 export interface Order {
@@ -62,6 +63,7 @@ interface IBlockchainContext {
   provider: ethers.providers.Web3Provider | null;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
+  refreshWalletConnection: () => Promise<void>;
   isLoading: boolean;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
   
@@ -132,7 +134,8 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       imageUrl: "https://via.placeholder.com/150",
       blockchainVerified: true,
       inventoryLevel: 150,
-      contractAddress: "0x1234567890123456789012345678901234567890"
+      contractAddress: "0x1234567890123456789012345678901234567890",
+      rating: 4.5
     },
     {
       id: "2",
@@ -144,7 +147,34 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       imageUrl: "https://via.placeholder.com/150",
       blockchainVerified: true,
       inventoryLevel: 75,
-      contractAddress: "0x2345678901234567890123456789012345678901"
+      contractAddress: "0x2345678901234567890123456789012345678901",
+      rating: 4.8
+    },
+    {
+      id: "3",
+      name: "Blood Pressure Monitor",
+      description: "Digital automatic blood pressure monitor",
+      price: 129.99,
+      supplier: "TechMed Solutions",
+      category: "Equipment",
+      imageUrl: "https://via.placeholder.com/150",
+      blockchainVerified: true,
+      inventoryLevel: 12,
+      contractAddress: "0x3456789012345678901234567890123456789012",
+      rating: 4.6
+    },
+    {
+      id: "4",
+      name: "Insulin Pens",
+      description: "Disposable insulin delivery pens",
+      price: 89.99,
+      supplier: "DiabetesCare Ltd",
+      category: "Diabetes Care",
+      imageUrl: "https://via.placeholder.com/150",
+      blockchainVerified: false,
+      inventoryLevel: 8,
+      contractAddress: "0x4567890123456789012345678901234567890123",
+      rating: 4.3
     }
   ];
 
@@ -177,6 +207,7 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const connectWallet = useCallback(async () => {
+    // Check if MetaMask is installed
     if (typeof window.ethereum === 'undefined') {
       addAppNotification("MetaMask is not installed. Please install MetaMask to use the marketplace.", "error");
       return;
@@ -184,29 +215,96 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     setIsLoading(true);
     try {
+      // First, check if we're already connected
+      const currentAccounts = await window.ethereum.request({ 
+        method: 'eth_accounts' 
+      });
+
+      let accounts;
+      if (currentAccounts.length > 0) {
+        // We already have accounts, use them
+        accounts = currentAccounts;
+        console.log("Using existing accounts:", accounts);
+      } else {
+        // Request account access
+        accounts = await window.ethereum.request({ 
+          method: 'eth_requestAccounts' 
+        });
+        console.log("Requested new accounts:", accounts);
+      }
+
+      if (accounts.length === 0) {
+        addAppNotification("No accounts found. Please unlock MetaMask.", "error");
+        return;
+      }
+
+      // Create provider and signer
       const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const accounts = await provider.send("eth_requestAccounts", []);
       const signer = provider.getSigner();
       
+      // Get the connected address
+      const connectedAddress = await signer.getAddress();
+      
+      // Set state
       setProvider(provider);
       setSigner(signer);
-      setAddress(accounts[0]);
+      setAddress(connectedAddress);
       
       addAppNotification("Wallet connected successfully!", "success");
-    } catch (error) {
+      
+      // Check if we're on the right network (optional)
+      const network = await provider.getNetwork();
+      console.log("Connected to network:", network);
+      
+    } catch (error: any) {
       console.error("Error connecting wallet:", error);
-      addAppNotification("Failed to connect wallet. Please try again.", "error");
+      
+      if (error.code === 4001) {
+        addAppNotification("Connection rejected by user.", "error");
+      } else if (error.code === -32002) {
+        addAppNotification("Please check MetaMask and try again.", "error");
+      } else {
+        addAppNotification("Failed to connect wallet. Please try again.", "error");
+      }
     } finally {
       setIsLoading(false);
     }
   }, [addAppNotification]);
 
-  const disconnectWallet = useCallback(() => {
+  const refreshWalletConnection = useCallback(async () => {
+    console.log("Refreshing wallet connection...");
+    
+    // Clear current state first
     setAddress(null);
     setSigner(null);
     setProvider(null);
     setMarketplaceContract(null);
-    addAppNotification("Wallet disconnected.", "info");
+    
+    // Wait a moment for state to clear
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Try to reconnect
+    await connectWallet();
+  }, [connectWallet]);
+
+  const disconnectWallet = useCallback(() => {
+    try {
+      // Clear all state
+      setAddress(null);
+      setSigner(null);
+      setProvider(null);
+      setMarketplaceContract(null);
+      
+      // Force a small delay to ensure state is cleared
+      setTimeout(() => {
+        addAppNotification("Wallet disconnected successfully.", "info");
+      }, 100);
+      
+      console.log("Wallet disconnected, state cleared");
+    } catch (error) {
+      console.error("Error disconnecting wallet:", error);
+      addAppNotification("Error disconnecting wallet.", "error");
+    }
   }, [addAppNotification]);
 
   const createProductListing = useCallback(async (product: ProductListing): Promise<boolean> => {
@@ -379,14 +477,49 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
 
+  // Check for existing connection on mount
+  useEffect(() => {
+    const checkExistingConnection = async () => {
+      if (typeof window.ethereum !== 'undefined') {
+        try {
+          const accounts = await window.ethereum.request({ 
+            method: 'eth_accounts' 
+          });
+          
+          if (accounts.length > 0) {
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            const signer = provider.getSigner();
+            const address = await signer.getAddress();
+            
+            setProvider(provider);
+            setSigner(signer);
+            setAddress(address);
+            console.log("Auto-connected to existing wallet:", address);
+          }
+        } catch (error) {
+          console.error("Error checking existing connection:", error);
+        }
+      }
+    };
+
+    checkExistingConnection();
+  }, []);
+
   // Listen for account changes
   useEffect(() => {
     if (typeof window.ethereum !== 'undefined') {
       const handleAccountsChanged = (accounts: string[]) => {
+        console.log("Accounts changed:", accounts);
+        
         if (accounts.length === 0) {
+          // User disconnected all accounts
+          console.log("No accounts available, disconnecting wallet");
           disconnectWallet();
         } else if (accounts[0] !== address) {
+          // User switched to a different account
+          console.log("Account changed from", address, "to", accounts[0]);
           setAddress(accounts[0]);
+          addAppNotification("Account changed.", "info");
         }
       };
 
@@ -402,7 +535,7 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         window.ethereum.removeListener('chainChanged', handleChainChanged);
       };
     }
-  }, [address, disconnectWallet]);
+  }, [address, disconnectWallet, addAppNotification]);
 
   const contextValue = useMemo(() => ({
     address,
@@ -410,6 +543,7 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     provider,
     connectWallet,
     disconnectWallet,
+    refreshWalletConnection,
     isLoading,
     setIsLoading,
     appNotifications,
@@ -431,6 +565,7 @@ export const BlockchainProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     provider,
     connectWallet,
     disconnectWallet,
+    refreshWalletConnection,
     isLoading,
     appNotifications,
     addAppNotification,

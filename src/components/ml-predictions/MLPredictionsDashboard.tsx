@@ -1,462 +1,548 @@
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Brain, TrendingUp, AlertTriangle, Package, Calendar, BarChart3, Loader2 } from 'lucide-react';
-
-interface MedicineData {
-  medicine_id: number;
-  medicine_name: string;
-  category: string;
-  current_stock: number;
-  daily_consumption: number;
-  days_since_last_restock: number;
-  supplier_lead_time: number;
-  unit_cost: number;
-  shelf_life_days: number;
-  temperature_sensitive: boolean;
-  critical_medicine: boolean;
-  seasonal_demand: boolean;
-  month: number;
-  day_of_week: number;
-  is_weekend: boolean;
-  days_to_expiry: number;
-}
+import React, { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { 
+  Brain, 
+  TrendingUp, 
+  AlertTriangle, 
+  CheckCircle, 
+  Clock, 
+  Package, 
+  Activity,
+  RefreshCw,
+  FileText,
+  BarChart3,
+  Target,
+  Zap
+} from "lucide-react";
+import { useInventory, InventoryItem } from "@/contexts/InventoryContext";
 
 interface PredictionResult {
-  medicine_name: string;
+  category: string;
+  predicted_demand: number;
   current_stock: number;
-  predicted_restock_amount: number;
-  predicted_days_until_restock: number;
-  urgency_level: 'High' | 'Medium' | 'Low';
+  restocking_threshold: number;
+  restocking_needed: boolean;
+  days_until_stockout: number;
+  threshold: number;
+  status: string;
 }
 
-interface ModelPerformance {
-  model_name: string;
-  restock_amount_r2: number;
-  days_until_restock_r2: number;
-  mse: number;
-  mae: number;
+interface PredictionSummary {
+  total_items: number;
+  urgent_restocking: number;
+  moderate_restocking: number;
+  safe_stock_levels: number;
+  timestamp: string;
 }
 
-export function MLPredictionsDashboard() {
+interface MLResults {
+  success: boolean;
+  summary?: PredictionSummary;
+  predictions?: {
+    urgent: { item_name: string; prediction: PredictionResult }[];
+    moderate: { item_name: string; prediction: PredictionResult }[];
+    safe: { item_name: string; prediction: PredictionResult }[];
+  };
+  report?: string;
+  error?: string;
+  timestamp: string;
+}
+
+export const MLPredictionsDashboard: React.FC = () => {
+  const { inventoryItems } = useInventory();
+  const [results, setResults] = useState<MLResults | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [predictions, setPredictions] = useState<PredictionResult[]>([]);
-  const [modelPerformance, setModelPerformance] = useState<ModelPerformance[]>([]);
-  const [featureImportance, setFeatureImportance] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState('predictions');
-  const [selectedMedicine, setSelectedMedicine] = useState<MedicineData | null>(null);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  // Mock data for demonstration
-  const mockPredictions: PredictionResult[] = [
-    {
-      medicine_name: 'Paracetamol',
-      current_stock: 150,
-      predicted_restock_amount: 500,
-      predicted_days_until_restock: 5,
-      urgency_level: 'High'
-    },
-    {
-      medicine_name: 'Ibuprofen',
-      current_stock: 300,
-      predicted_restock_amount: 400,
-      predicted_days_until_restock: 12,
-      urgency_level: 'Medium'
-    },
-    {
-      medicine_name: 'Metformin',
-      current_stock: 50,
-      predicted_restock_amount: 600,
-      predicted_days_until_restock: 3,
-      urgency_level: 'High'
-    },
-    {
-      medicine_name: 'Amlodipine',
-      current_stock: 200,
-      predicted_restock_amount: 300,
-      predicted_days_until_restock: 18,
-      urgency_level: 'Low'
-    },
-    {
-      medicine_name: 'Albuterol',
-      current_stock: 75,
-      predicted_restock_amount: 450,
-      predicted_days_until_restock: 7,
-      urgency_level: 'High'
+  const runPredictions = async () => {
+    setIsLoading(true);
+    try {
+      // In a real implementation, this would call a backend API
+      // For now, we'll simulate the process
+      console.log("Running ML predictions for inventory items...");
+      
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Create predictions based on inventory items
+      const predictions: { [key: string]: PredictionResult } = {};
+      
+      inventoryItems.forEach(item => {
+        // Simulate ML predictions based on item characteristics
+        const predictedDemand = Math.random() * 20 + 5; // 5-25 units
+        const restockingThreshold = item.threshold * 0.7;
+        const restockingNeeded = item.stock < restockingThreshold;
+        const daysUntilStockout = restockingNeeded ? 
+          Math.max(0, Math.floor((item.stock - restockingThreshold) / (predictedDemand / 30))) : 0;
+        
+        predictions[item.name] = {
+          category: item.category,
+          predicted_demand: predictedDemand,
+          current_stock: item.stock,
+          restocking_threshold: restockingThreshold,
+          restocking_needed: restockingNeeded,
+          days_until_stockout: daysUntilStockout,
+          threshold: item.threshold,
+          status: item.status
+        };
+      });
+      
+      // Categorize predictions
+      const urgent: { item_name: string; prediction: PredictionResult }[] = [];
+      const moderate: { item_name: string; prediction: PredictionResult }[] = [];
+      const safe: { item_name: string; prediction: PredictionResult }[] = [];
+      
+      Object.entries(predictions).forEach(([itemName, prediction]) => {
+        if (prediction.restocking_needed) {
+          if (prediction.days_until_stockout <= 7) {
+            urgent.push({ item_name: itemName, prediction });
+          } else if (prediction.days_until_stockout <= 14) {
+            moderate.push({ item_name: itemName, prediction });
+          }
+        } else {
+          safe.push({ item_name: itemName, prediction });
+        }
+      });
+      
+      const sampleResults: MLResults = {
+        success: true,
+        summary: {
+          total_items: inventoryItems.length,
+          urgent_restocking: urgent.length,
+          moderate_restocking: moderate.length,
+          safe_stock_levels: safe.length,
+          timestamp: new Date().toISOString()
+        },
+        predictions: {
+          urgent,
+          moderate,
+          safe
+        },
+        timestamp: new Date().toISOString()
+      };
+      
+      setResults(sampleResults);
+      setLastUpdated(new Date().toISOString());
+      
+    } catch (error) {
+      console.error("Error running predictions:", error);
+      setResults({
+        success: false,
+        error: "Failed to run predictions",
+        timestamp: new Date().toISOString()
+      });
+    } finally {
+      setIsLoading(false);
     }
-  ];
-
-  const mockModelPerformance: ModelPerformance[] = [
-    { model_name: 'XGBoost', restock_amount_r2: 0.89, days_until_restock_r2: 0.85, mse: 0.12, mae: 0.08 },
-    { model_name: 'Random Forest', restock_amount_r2: 0.87, days_until_restock_r2: 0.83, mse: 0.14, mae: 0.09 },
-    { model_name: 'LightGBM', restock_amount_r2: 0.88, days_until_restock_r2: 0.84, mse: 0.13, mae: 0.08 },
-    { model_name: 'Gradient Boosting', restock_amount_r2: 0.86, days_until_restock_r2: 0.82, mse: 0.15, mae: 0.10 },
-    { model_name: 'Linear Regression', restock_amount_r2: 0.75, days_until_restock_r2: 0.70, mse: 0.25, mae: 0.15 }
-  ];
-
-  const mockFeatureImportance = [
-    { feature: 'current_stock', importance: 0.25 },
-    { feature: 'daily_consumption', importance: 0.22 },
-    { feature: 'days_since_last_restock', importance: 0.18 },
-    { feature: 'supplier_lead_time', importance: 0.15 },
-    { feature: 'critical_medicine', importance: 0.12 },
-    { feature: 'stock_level_percentage', importance: 0.10 },
-    { feature: 'urgency_score', importance: 0.08 }
-  ];
+  };
 
   useEffect(() => {
-    // Load mock data
-    setPredictions(mockPredictions);
-    setModelPerformance(mockModelPerformance);
-    setFeatureImportance(mockFeatureImportance);
-  }, []);
-
-  const handleRunPredictions = async () => {
-    setIsLoading(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsLoading(false);
-  };
-
-  const getUrgencyColor = (level: string) => {
-    switch (level) {
-      case 'High': return 'bg-red-500';
-      case 'Medium': return 'bg-yellow-500';
-      case 'Low': return 'bg-green-500';
-      default: return 'bg-gray-500';
+    // Load initial results if available
+    if (inventoryItems.length > 0) {
+      runPredictions();
     }
+  }, [inventoryItems]);
+
+  const getUrgencyColor = (daysUntilStockout: number) => {
+    if (daysUntilStockout <= 7) return "text-red-600";
+    if (daysUntilStockout <= 14) return "text-yellow-600";
+    return "text-green-600";
   };
 
-  const getUrgencyTextColor = (level: string) => {
-    switch (level) {
-      case 'High': return 'text-red-600';
-      case 'Medium': return 'text-yellow-600';
-      case 'Low': return 'text-green-600';
+  const getUrgencyBadge = (daysUntilStockout: number) => {
+    if (daysUntilStockout <= 7) return "destructive";
+    if (daysUntilStockout <= 14) return "secondary";
+    return "default";
+  };
+
+  const getStockLevelPercentage = (current: number, threshold: number) => {
+    return Math.min((current / threshold) * 100, 100);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'critical': return 'text-red-600';
+      case 'low': return 'text-yellow-600';
+      case 'good': return 'text-green-600';
       default: return 'text-gray-600';
     }
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <Brain className="h-8 w-8 text-purple-600" />
-          <div>
-            <h1 className="text-3xl font-bold">ML Medicine Restocking Predictions</h1>
-            <p className="text-muted-foreground">AI-powered inventory management predictions</p>
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="border-b bg-card shadow-card">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Brain className="h-8 w-8 text-primary" />
+                <div>
+                  <h1 className="text-2xl font-bold text-foreground">ML Predictions Dashboard</h1>
+                  <p className="text-sm text-muted-foreground">AI-powered medicine restocking predictions</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <Button 
+                onClick={runPredictions} 
+                disabled={isLoading}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                {isLoading ? "Running..." : "Run Predictions"}
+              </Button>
+              
+              {lastUpdated && (
+                <span className="text-sm text-muted-foreground">
+                  Last updated: {new Date(lastUpdated).toLocaleString()}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-        <Button onClick={handleRunPredictions} disabled={isLoading}>
-          {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <TrendingUp className="h-4 w-4 mr-2" />}
-          {isLoading ? 'Running Predictions...' : 'Run Predictions'}
-        </Button>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="predictions">Predictions</TabsTrigger>
-          <TabsTrigger value="performance">Model Performance</TabsTrigger>
-          <TabsTrigger value="features">Feature Analysis</TabsTrigger>
-          <TabsTrigger value="insights">Insights</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="predictions" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Package className="h-5 w-5" />
-                <span>Restocking Predictions</span>
-              </CardTitle>
-              <CardDescription>
-                AI predictions for medicine restocking needs and timing
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Medicine</TableHead>
-                    <TableHead>Current Stock</TableHead>
-                    <TableHead>Predicted Restock Amount</TableHead>
-                    <TableHead>Days Until Restock</TableHead>
-                    <TableHead>Urgency Level</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {predictions.map((prediction, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="font-medium">{prediction.medicine_name}</TableCell>
-                      <TableCell>{prediction.current_stock}</TableCell>
-                      <TableCell>{prediction.predicted_restock_amount}</TableCell>
-                      <TableCell>{prediction.predicted_days_until_restock}</TableCell>
-                      <TableCell>
-                        <Badge className={getUrgencyColor(prediction.urgency_level)}>
-                          {prediction.urgency_level}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button variant="outline" size="sm">
-                          View Details
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">High Priority Items</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600">
-                  {predictions.filter(p => p.urgency_level === 'High').length}
-                </div>
-                <p className="text-xs text-muted-foreground">Need immediate attention</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Total Restock Value</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-blue-600">
-                  ${predictions.reduce((sum, p) => sum + p.predicted_restock_amount, 0).toLocaleString()}
-                </div>
-                <p className="text-xs text-muted-foreground">Predicted restock cost</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Average Days Until Restock</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {Math.round(predictions.reduce((sum, p) => sum + p.predicted_days_until_restock, 0) / predictions.length)}
-                </div>
-                <p className="text-xs text-muted-foreground">Days on average</p>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="performance" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <BarChart3 className="h-5 w-5" />
-                <span>Model Performance Comparison</span>
-              </CardTitle>
-              <CardDescription>
-                Performance metrics for different ML models
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Model</TableHead>
-                    <TableHead>Restock Amount R²</TableHead>
-                    <TableHead>Days Until Restock R²</TableHead>
-                    <TableHead>MSE</TableHead>
-                    <TableHead>MAE</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {modelPerformance.map((model, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="font-medium">{model.model_name}</TableCell>
-                      <TableCell>{(model.restock_amount_r2 * 100).toFixed(1)}%</TableCell>
-                      <TableCell>{(model.days_until_restock_r2 * 100).toFixed(1)}%</TableCell>
-                      <TableCell>{model.mse.toFixed(3)}</TableCell>
-                      <TableCell>{model.mae.toFixed(3)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Best Model: XGBoost</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>Restock Amount Accuracy</span>
-                    <span className="font-bold text-green-600">89%</span>
+      {/* Main Content */}
+      <div className="container mx-auto px-6 py-6">
+        {results?.success ? (
+          <>
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2">
+                    <Package className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Items</p>
+                      <p className="text-2xl font-bold">{results.summary?.total_items}</p>
+                    </div>
                   </div>
-                  <Progress value={89} className="w-full" />
-                  
-                  <div className="flex justify-between">
-                    <span>Days Until Restock Accuracy</span>
-                    <span className="font-bold text-blue-600">85%</span>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-red-600" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Urgent Restocking</p>
+                      <p className="text-2xl font-bold text-red-600">{results.summary?.urgent_restocking}</p>
+                    </div>
                   </div>
-                  <Progress value={85} className="w-full" />
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-yellow-600" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Moderate Restocking</p>
+                      <p className="text-2xl font-bold text-yellow-600">{results.summary?.moderate_restocking}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Safe Stock Levels</p>
+                      <p className="text-2xl font-bold text-green-600">{results.summary?.safe_stock_levels}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Model Insights</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                    <span>XGBoost performs best for both predictions</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                    <span>Random Forest is most stable</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                    <span>Linear models struggle with complex patterns</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
+            {/* Tabs */}
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="urgent">Urgent</TabsTrigger>
+                <TabsTrigger value="moderate">Moderate</TabsTrigger>
+                <TabsTrigger value="safe">Safe</TabsTrigger>
+              </TabsList>
 
-        <TabsContent value="features" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <TrendingUp className="h-5 w-5" />
-                <span>Feature Importance Analysis</span>
-              </CardTitle>
-              <CardDescription>
-                Most important features for predicting restocking needs
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+              <TabsContent value="overview" className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Urgent Items */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <AlertTriangle className="h-5 w-5 text-red-600" />
+                        Urgent Restocking Needed
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {results.predictions?.urgent.length ? (
+                        results.predictions.urgent.map((item, index) => (
+                          <div key={index} className="border rounded-lg p-4 bg-red-50">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="font-semibold">{item.item_name}</h4>
+                              <Badge variant="destructive">
+                                {item.prediction.days_until_stockout} days left
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground mb-2">{item.prediction.category}</p>
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-sm">
+                                <span>Current Stock:</span>
+                                <span className="font-semibold">{item.prediction.current_stock} units</span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span>Predicted Demand:</span>
+                                <span className="font-semibold">{item.prediction.predicted_demand.toFixed(1)} units</span>
+                              </div>
+                              <Progress 
+                                value={getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold)} 
+                                className="h-2"
+                              />
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-muted-foreground text-center py-4">No urgent restocking needed</p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Moderate Items */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Clock className="h-5 w-5 text-yellow-600" />
+                        Moderate Restocking Needed
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {results.predictions?.moderate.length ? (
+                        results.predictions.moderate.map((item, index) => (
+                          <div key={index} className="border rounded-lg p-4 bg-yellow-50">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="font-semibold">{item.item_name}</h4>
+                              <Badge variant="secondary">
+                                {item.prediction.days_until_stockout} days left
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground mb-2">{item.prediction.category}</p>
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-sm">
+                                <span>Current Stock:</span>
+                                <span className="font-semibold">{item.prediction.current_stock} units</span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span>Predicted Demand:</span>
+                                <span className="font-semibold">{item.prediction.predicted_demand.toFixed(1)} units</span>
+                              </div>
+                              <Progress 
+                                value={getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold)} 
+                                className="h-2"
+                              />
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-muted-foreground text-center py-4">No moderate restocking needed</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="urgent" className="space-y-4">
+                {results.predictions?.urgent.length ? (
+                  results.predictions.urgent.map((item, index) => (
+                    <Card key={index}>
+                      <CardContent className="p-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-semibold">{item.item_name}</h3>
+                            <p className="text-sm text-muted-foreground">{item.prediction.category}</p>
+                          </div>
+                          <Badge variant="destructive" className="text-sm">
+                            URGENT - {item.prediction.days_until_stockout} days left
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Current Stock</p>
+                            <p className="text-2xl font-bold text-red-600">{item.prediction.current_stock}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Predicted Demand</p>
+                            <p className="text-2xl font-bold">{item.prediction.predicted_demand.toFixed(1)}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Restocking Threshold</p>
+                            <p className="text-2xl font-bold">{item.prediction.restocking_threshold.toFixed(1)}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span>Stock Level</span>
+                            <span>{getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold).toFixed(1)}%</span>
+                          </div>
+                          <Progress 
+                            value={getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold)} 
+                            className="h-3"
+                          />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-center py-12">
+                    <CheckCircle className="h-12 w-12 text-green-600 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No Urgent Restocking Needed</h3>
+                    <p className="text-muted-foreground">All inventory items have adequate stock levels.</p>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="moderate" className="space-y-4">
+                {results.predictions?.moderate.length ? (
+                  results.predictions.moderate.map((item, index) => (
+                    <Card key={index}>
+                      <CardContent className="p-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-semibold">{item.item_name}</h3>
+                            <p className="text-sm text-muted-foreground">{item.prediction.category}</p>
+                          </div>
+                          <Badge variant="secondary" className="text-sm">
+                            MODERATE - {item.prediction.days_until_stockout} days left
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Current Stock</p>
+                            <p className="text-2xl font-bold text-yellow-600">{item.prediction.current_stock}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Predicted Demand</p>
+                            <p className="text-2xl font-bold">{item.prediction.predicted_demand.toFixed(1)}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Restocking Threshold</p>
+                            <p className="text-2xl font-bold">{item.prediction.restocking_threshold.toFixed(1)}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span>Stock Level</span>
+                            <span>{getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold).toFixed(1)}%</span>
+                          </div>
+                          <Progress 
+                            value={getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold)} 
+                            className="h-3"
+                          />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-center py-12">
+                    <CheckCircle className="h-12 w-12 text-green-600 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No Moderate Restocking Needed</h3>
+                    <p className="text-muted-foreground">All inventory items have adequate stock levels.</p>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="safe" className="space-y-4">
+                {results.predictions?.safe.length ? (
+                  results.predictions.safe.map((item, index) => (
+                    <Card key={index}>
+                      <CardContent className="p-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-semibold">{item.item_name}</h3>
+                            <p className="text-sm text-muted-foreground">{item.prediction.category}</p>
+                          </div>
+                          <Badge variant="default" className="text-sm">
+                            SAFE STOCK LEVELS
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Current Stock</p>
+                            <p className="text-2xl font-bold text-green-600">{item.prediction.current_stock}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Predicted Demand</p>
+                            <p className="text-2xl font-bold">{item.prediction.predicted_demand.toFixed(1)}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Restocking Threshold</p>
+                            <p className="text-2xl font-bold">{item.prediction.restocking_threshold.toFixed(1)}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span>Stock Level</span>
+                            <span>{getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold).toFixed(1)}%</span>
+                          </div>
+                          <Progress 
+                            value={getStockLevelPercentage(item.prediction.current_stock, item.prediction.threshold)} 
+                            className="h-3"
+                          />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-center py-12">
+                    <AlertTriangle className="h-12 w-12 text-yellow-600 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No Safe Stock Categories</h3>
+                    <p className="text-muted-foreground">All inventory items need restocking attention.</p>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </>
+        ) : (
+          <div className="text-center py-12">
+            {isLoading ? (
               <div className="space-y-4">
-                {featureImportance.map((feature, index) => (
-                  <div key={index} className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">{feature.feature.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
-                      <span className="text-muted-foreground">{(feature.importance * 100).toFixed(1)}%</span>
-                    </div>
-                    <Progress value={feature.importance * 100} className="w-full" />
-                  </div>
-                ))}
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+                <h3 className="text-lg font-semibold">Running ML Predictions...</h3>
+                <p className="text-muted-foreground">Analyzing inventory data and generating restocking predictions</p>
               </div>
-            </CardContent>
-          </Card>
-
-          <Alert>
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Key Insights:</strong> Current stock and daily consumption are the most critical factors 
-              for predicting restocking needs. Critical medicines and supplier lead times also significantly 
-              impact predictions.
-            </AlertDescription>
-          </Alert>
-        </TabsContent>
-
-        <TabsContent value="insights" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>High Priority Alerts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {predictions.filter(p => p.urgency_level === 'High').map((prediction, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                        <p className="font-medium">{prediction.medicine_name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Restock in {prediction.predicted_days_until_restock} days
-                        </p>
-                      </div>
-                      <Badge variant="destructive">Urgent</Badge>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Cost Optimization</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-sm font-medium">Total Predicted Cost</p>
-                    <p className="text-2xl font-bold text-green-600">
-                      ${predictions.reduce((sum, p) => sum + p.predicted_restock_amount, 0).toLocaleString()}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Potential Savings</p>
-                    <p className="text-lg font-bold text-blue-600">$15,000</p>
-                    <p className="text-xs text-muted-foreground">Through optimized ordering</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            ) : results?.error ? (
+              <div className="space-y-4">
+                <AlertTriangle className="h-12 w-12 text-red-600 mx-auto" />
+                <h3 className="text-lg font-semibold">Prediction Error</h3>
+                <p className="text-muted-foreground">{results.error}</p>
+                <Button onClick={runPredictions}>Try Again</Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <Brain className="h-12 w-12 text-muted-foreground mx-auto" />
+                <h3 className="text-lg font-semibold">No Predictions Available</h3>
+                <p className="text-muted-foreground">Run ML predictions to analyze inventory restocking needs</p>
+                <Button onClick={runPredictions}>Run Predictions</Button>
+              </div>
+            )}
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Recommendations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-red-500 rounded-full mt-2"></div>
-                  <div>
-                    <p className="font-medium">Immediate Action Required</p>
-                    <p className="text-sm text-muted-foreground">
-                      Paracetamol and Metformin need immediate restocking within 5 days
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-yellow-500 rounded-full mt-2"></div>
-                  <div>
-                    <p className="font-medium">Monitor Closely</p>
-                    <p className="text-sm text-muted-foreground">
-                      Ibuprofen and Albuterol should be monitored for the next 2 weeks
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div>
-                    <p className="font-medium">Optimize Ordering</p>
-                    <p className="text-sm text-muted-foreground">
-                      Consider bulk ordering for Amlodipine to reduce costs
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        )}
+      </div>
     </div>
   );
-} 
+}; 
