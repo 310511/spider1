@@ -48,6 +48,10 @@ memory_data = {}
 tasks_data = {}
 alerts_data = []
 
+# RFID data storage
+rfid_tags = {}
+rfid_assignments = {}
+
 class ProcessTextRequest(BaseModel):
     user_id: str
     text: str
@@ -109,6 +113,111 @@ class AddMedicalSupplyRequest(BaseModel):
     expiry_date: Optional[str] = None
     supplier_id: str
     unit: str = "units"
+
+# RFID Models
+class RFIDTag(BaseModel):
+    tag_id: str
+    tag_type: str = "inventory"
+    description: Optional[str] = None
+    created_at: str
+    last_seen: Optional[str] = None
+    status: str = "active"
+
+class RFIDAssignment(BaseModel):
+    assignment_id: str
+    tag_id: str
+    item_id: str
+    item_type: str  # "medicine", "supply", "equipment"
+    assigned_at: str
+    assigned_by: str
+    notes: Optional[str] = None
+
+class AssignRFIDRequest(BaseModel):
+    tag_id: str
+    item_id: str
+    item_type: str
+    assigned_by: str
+    notes: Optional[str] = None
+
+# Initialize sample RFID data
+def initialize_rfid_data():
+    """Initialize sample RFID data"""
+    sample_tags = [
+        RFIDTag(
+            tag_id="RFID_001",
+            tag_type="inventory",
+            description="Medicine tracking tag",
+            created_at=datetime.now().isoformat(),
+            status="active"
+        ),
+        RFIDTag(
+            tag_id="RFID_002",
+            tag_type="inventory",
+            description="Supply tracking tag",
+            created_at=datetime.now().isoformat(),
+            status="active"
+        ),
+        RFIDTag(
+            tag_id="RFID_003",
+            tag_type="inventory",
+            description="Equipment tracking tag",
+            created_at=datetime.now().isoformat(),
+            status="active"
+        ),
+        RFIDTag(
+            tag_id="RFID_004",
+            tag_type="inventory",
+            description="Medicine tracking tag",
+            created_at=datetime.now().isoformat(),
+            status="active"
+        ),
+        RFIDTag(
+            tag_id="RFID_005",
+            tag_type="inventory",
+            description="Supply tracking tag",
+            created_at=datetime.now().isoformat(),
+            status="active"
+        )
+    ]
+    
+    for tag in sample_tags:
+        rfid_tags[tag.tag_id] = tag
+    
+    sample_assignments = [
+        RFIDAssignment(
+            assignment_id="assign_0001",
+            tag_id="RFID_001",
+            item_id="ms_001",
+            item_type="medicine",
+            assigned_at=datetime.now().isoformat(),
+            assigned_by="admin",
+            notes="Assigned to Paracetamol 500mg"
+        ),
+        RFIDAssignment(
+            assignment_id="assign_0002",
+            tag_id="RFID_002",
+            item_id="ms_003",
+            item_type="supply",
+            assigned_at=datetime.now().isoformat(),
+            assigned_by="admin",
+            notes="Assigned to Bandages (10cm)"
+        ),
+        RFIDAssignment(
+            assignment_id="assign_0003",
+            tag_id="RFID_003",
+            item_id="ms_004",
+            item_type="medicine",
+            assigned_at=datetime.now().isoformat(),
+            assigned_by="admin",
+            notes="Assigned to Antibiotic Cream"
+        )
+    ]
+    
+    for assignment in sample_assignments:
+        rfid_assignments[assignment.assignment_id] = assignment
+
+# Initialize RFID data on startup
+initialize_rfid_data()
 
 class MemoryAnalysis(BaseModel):
     importance_score: float
@@ -914,6 +1023,168 @@ async def get_suppliers():
         ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Suppliers retrieval error: {str(e)}")
+
+# RFID Endpoints
+@app.get("/rfid/tags")
+async def get_rfid_tags():
+    """Get all RFID tags"""
+    try:
+        return list(rfid_tags.values())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID tags retrieval error: {str(e)}")
+
+@app.post("/rfid/tags")
+async def create_rfid_tag(tag: RFIDTag):
+    """Create a new RFID tag"""
+    try:
+        if tag.tag_id in rfid_tags:
+            raise HTTPException(status_code=400, detail="RFID tag already exists")
+        
+        rfid_tags[tag.tag_id] = tag
+        return {"message": f"RFID tag {tag.tag_id} created successfully", "tag": tag}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID tag creation error: {str(e)}")
+
+@app.get("/rfid/tags/{tag_id}")
+async def get_rfid_tag(tag_id: str):
+    """Get a specific RFID tag"""
+    try:
+        if tag_id not in rfid_tags:
+            raise HTTPException(status_code=404, detail="RFID tag not found")
+        
+        return rfid_tags[tag_id]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID tag retrieval error: {str(e)}")
+
+@app.put("/rfid/tags/{tag_id}")
+async def update_rfid_tag(tag_id: str, tag: RFIDTag):
+    """Update an RFID tag"""
+    try:
+        if tag_id not in rfid_tags:
+            raise HTTPException(status_code=404, detail="RFID tag not found")
+        
+        rfid_tags[tag_id] = tag
+        return {"message": f"RFID tag {tag_id} updated successfully", "tag": tag}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID tag update error: {str(e)}")
+
+@app.delete("/rfid/tags/{tag_id}")
+async def delete_rfid_tag(tag_id: str):
+    """Delete an RFID tag"""
+    try:
+        if tag_id not in rfid_tags:
+            raise HTTPException(status_code=404, detail="RFID tag not found")
+        
+        del rfid_tags[tag_id]
+        return {"message": f"RFID tag {tag_id} deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID tag deletion error: {str(e)}")
+
+@app.get("/rfid/assignments")
+async def get_rfid_assignments():
+    """Get all RFID assignments"""
+    try:
+        return list(rfid_assignments.values())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID assignments retrieval error: {str(e)}")
+
+@app.post("/rfid/assign")
+async def assign_rfid_tag(request: AssignRFIDRequest):
+    """Assign an RFID tag to an item"""
+    try:
+        if request.tag_id not in rfid_tags:
+            raise HTTPException(status_code=404, detail="RFID tag not found")
+        
+        # Check if tag is already assigned
+        for assignment in rfid_assignments.values():
+            if assignment.tag_id == request.tag_id:
+                raise HTTPException(status_code=400, detail="RFID tag is already assigned")
+        
+        assignment_id = f"assign_{len(rfid_assignments) + 1:04d}"
+        assignment = RFIDAssignment(
+            assignment_id=assignment_id,
+            tag_id=request.tag_id,
+            item_id=request.item_id,
+            item_type=request.item_type,
+            assigned_at=datetime.now().isoformat(),
+            assigned_by=request.assigned_by,
+            notes=request.notes
+        )
+        
+        rfid_assignments[assignment_id] = assignment
+        return {"message": f"RFID tag {request.tag_id} assigned successfully", "assignment": assignment}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID assignment error: {str(e)}")
+
+@app.get("/rfid/assignments/{assignment_id}")
+async def get_rfid_assignment(assignment_id: str):
+    """Get a specific RFID assignment"""
+    try:
+        if assignment_id not in rfid_assignments:
+            raise HTTPException(status_code=404, detail="RFID assignment not found")
+        
+        return rfid_assignments[assignment_id]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID assignment retrieval error: {str(e)}")
+
+@app.delete("/rfid/assignments/{assignment_id}")
+async def remove_rfid_assignment(assignment_id: str):
+    """Remove an RFID assignment"""
+    try:
+        if assignment_id not in rfid_assignments:
+            raise HTTPException(status_code=404, detail="RFID assignment not found")
+        
+        assignment = rfid_assignments[assignment_id]
+        del rfid_assignments[assignment_id]
+        return {"message": f"RFID assignment {assignment_id} removed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID assignment removal error: {str(e)}")
+
+@app.get("/rfid/items/{item_id}")
+async def get_item_rfid_info(item_id: str):
+    """Get RFID information for a specific item"""
+    try:
+        item_assignments = []
+        for assignment in rfid_assignments.values():
+            if assignment.item_id == item_id:
+                item_assignments.append(assignment)
+        
+        if not item_assignments:
+            return {"item_id": item_id, "rfid_assignments": [], "message": "No RFID tags assigned to this item"}
+        
+        return {
+            "item_id": item_id,
+            "rfid_assignments": item_assignments,
+            "total_assignments": len(item_assignments)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Item RFID info retrieval error: {str(e)}")
+
+@app.get("/rfid/scan/{tag_id}")
+async def scan_rfid_tag(tag_id: str):
+    """Simulate scanning an RFID tag"""
+    try:
+        if tag_id not in rfid_tags:
+            raise HTTPException(status_code=404, detail="RFID tag not found")
+        
+        # Update last seen timestamp
+        rfid_tags[tag_id].last_seen = datetime.now().isoformat()
+        
+        # Find assignment for this tag
+        assignment = None
+        for assign in rfid_assignments.values():
+            if assign.tag_id == tag_id:
+                assignment = assign
+                break
+        
+        return {
+            "tag_id": tag_id,
+            "tag_info": rfid_tags[tag_id],
+            "assignment": assignment,
+            "scanned_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RFID scan error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 
